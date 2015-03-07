@@ -71,12 +71,27 @@ def mean_without_zeros(a):
 	return filtered.mean()
 
 
-def closest_good_estimate(rr, distances, radar_indices):
-	r, _ = closest_slice(distances)	
-	v = np.mean(rr[r])
+def closest_good_estimate_w(rr, distances, radar_indices, w):
+	ws = []
+	for we in w:
+		if we<=1:
+			ws.append(we)
+		else:
+			ws.append(0)
+	w = np.array(ws)
+	r, _ = closest_slice(distances)
+	q = np.sum(w[r])					
+	if q>0:
+		v = np.average(rr[r], weights=w[r])
+	else:
+		v=-1
 	min_dis = 100000
 	for radar in radar_indices:
-		v2 = np.mean(rr[radar])
+		q = np.sum(w[radar])					
+		if q>0:
+			v2 = np.average(rr[radar], weights=w[radar])
+		else:
+			v2=-1
 		dis = distances[radar][0]					
 		if v2>=0 and dis<min_dis:
 			r=radar
@@ -84,6 +99,19 @@ def closest_good_estimate(rr, distances, radar_indices):
 			v = v2
 	return r, v
 
+def closest_good_estimate(rr, distances, radar_indices, w):
+	r, _ = closest_slice(distances)
+	v = np.average(rr[r])
+	min_dis = 100000
+	for radar in radar_indices:
+		v2 = np.average(rr[radar])
+		dis = distances[radar][0]
+		q = np.sum(w[radar])					
+		if v2>=0 and dis<min_dis and q>0 and q<999*(len(radar)-1):
+			r=radar
+			min_dis=dis
+			v = v2
+	return r, v
 
 def data_set(file_name):
     reader = csv.reader(open(file_name))
@@ -114,20 +142,21 @@ def data_set(file_name):
         rr1 = parse_rr(row, rr1_ind)
         rr2 = parse_rr(row, rr2_ind)
         rr3 = parse_rr(row, rr3_ind)
-
+	w = parse_floats(row, rad_q_ind)
+	
 	if expected_ind >= 0:
 		ey = float(row[expected_ind])
 		y.append(ey)
 
 	
 	radar_indices = split_radars(times)
-	r, v = closest_good_estimate(rr2, distances, radar_indices)
+	r, v = closest_good_estimate(rr2, distances, radar_indices, w)
 	time_period = time_p(r, times, rr2)
 	if v<0:
-		r, v = closest_good_estimate(rr3, distances, radar_indices)
+		r, v = closest_good_estimate(rr3, distances, radar_indices, w)
 		time_period = time_p(r, times, rr3)
 	if v<0:
-		r, v = closest_good_estimate(rr1, distances, radar_indices)
+		r, v = closest_good_estimate(rr1, distances, radar_indices, w)
 		time_period = time_p(r, times, rr1)
 	
 	
@@ -145,6 +174,9 @@ def data_set(file_name):
 #0.00983595164706 -> 0.00962434
 #0.00957061504447 -> 0.00924509
 #0.00952959922595 -> 0.00918081
+#0.0095278045182
+#0.00945252983071
+#0.0094347918118 -> 0.00900467
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
