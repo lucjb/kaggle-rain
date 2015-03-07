@@ -52,17 +52,19 @@ def closest_slice(distances):
 	return closest_slice, min_distance
 		
 def time_p(radar_ind, times, rr):
-	max_t = -1
-	min_t =	100
+	max_t = -1.
+	min_t =	100.
 		
 	for ri in radar_ind:
 		if rr[ri]>0 and times[ri]<min_t:
 			min_t=times[ri]
 		if rr[ri]>0 and times[ri]>max_t:
 			max_t=times[ri]
+	if max_t<0:
+		return 0
 	b = (times.max()-times.min())/2/len(times)
-
-	return (max_t-min_t + b)/60.
+	time_period = (max_t-min_t + b)/60
+	return time_period
 
 def mean_without_zeros(a):
 	filtered = a[a!=0]
@@ -150,25 +152,29 @@ def data_set(file_name):
 
 	
 	radar_indices = split_radars(times)
+	good = []
+
 	r, v = closest_good_estimate(rr2, distances, radar_indices, w)
 	time_period = time_p(r, times, rr2)
-	if v<0:
-		r, v = closest_good_estimate(rr3, distances, radar_indices, w)
-		time_period = time_p(r, times, rr3)
-	if v<0:
-		r, v = closest_good_estimate(rr1, distances, radar_indices, w)
-		time_period = time_p(r, times, rr1)
-	
-	
-	if v<0:
+	if v>=0: good.append(v*time_period)	
+
+	r, v = closest_good_estimate(rr3, distances, radar_indices, w)
+	time_period = time_p(r, times, rr3)
+	if v>=0: good.append(v*time_period)	
+
+	r, v = closest_good_estimate(rr1, distances, radar_indices, w)
+	time_period = time_p(r, times, rr1)
+	if v>=0: good.append(v*time_period)	
+
+	if len(good)==0:	
 		avgs.append(0.)
 	else:
-		avgs.append(v*time_period)
-		
+		avgs.append(np.mean(good))
+	
         if i % 10000 == 0:
             print "Completed row %d" % i
     
-    return ids, np.array(y), avgs
+    return ids, np.array(y), np.array(avgs)
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -177,6 +183,8 @@ def data_set(file_name):
 #0.0095278045182
 #0.00945252983071
 #0.0094347918118 -> 0.00900467
+#0.00941938258085 -> 0.00893021
+#0.00938841086168 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
@@ -185,9 +193,9 @@ def data_set(file_name):
 
 _, y, avgs = data_set('train_2013.csv')
 print 'CRPS: ',  calc_crps(cdfs(avgs), y)
-print 'RMSE', math.sqrt(np.mean((y-avgs)**2))
+print 'RMSE', math.sqrt(np.mean((y[y<100]-avgs[y<100])**2))
 
-#plt.scatter(avgs, y)
+#plt.scatter(avgs[y<100], y[y<100])
 #plt.show()
 
 
