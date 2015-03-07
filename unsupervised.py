@@ -100,8 +100,8 @@ def closest_good_estimate_w(rr, distances, radar_indices, w):
 	return r, v
 
 def closest_good_estimate(rr, distances, radar_indices, w):
-	r, _ = closest_slice(distances)
-	v = np.average(rr[r])
+	r = radar_indices[0]
+	v = -1
 	min_dis = 100000
 	for radar in radar_indices:
 		v2 = np.average(rr[radar])
