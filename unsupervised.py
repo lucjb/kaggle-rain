@@ -115,6 +115,30 @@ def closest_good_estimate(rr, distances, radar_indices, w):
 			v = v2
 	return r, v
 
+def clean_weights(w, filler=0):
+	clean = []
+	for x in w:
+		if x>=0 and x<=1:
+			clean.append(x)
+		else:
+			clean.append(filler)
+	return clean
+
+def all_good_estimates(rr, distances, radar_indices, w, times):
+	good = []
+	dsum = np.sum(distances)
+	if dsum==0: dsum=1
+	for radar in radar_indices:
+		v2 = np.average(rr[radar])
+		dis = distances[radar][0]
+		q = np.sum(w[radar])					
+		if v2>=0 and q>1:
+			time_period = time_p(radar, times, rr)
+			e = v2*time_period
+			good.append(e)
+	return good
+
+
 def data_set(file_name):
     reader = csv.reader(open(file_name))
 
@@ -130,13 +154,14 @@ def data_set(file_name):
     except ValueError:
 	# no label
 	expected_ind = -1
-
+	
     composite_ind = header.index('Composite')
     distance_ind = header.index('DistanceToRadar')
     X = []
     y = []
     ids = []
     avgs = []
+
     for i, row in enumerate(reader):
 	ids.append(row[id_ind])	        
 	times = parse_floats(row, time_ind)
@@ -152,28 +177,20 @@ def data_set(file_name):
 
 	
 	radar_indices = split_radars(times)
+	
 	good = []
-
-	r, v = closest_good_estimate(rr2, distances, radar_indices, w)
-	time_period = time_p(r, times, rr2)
-	if v>=0: good.append(v*time_period)	
-
-	r, v = closest_good_estimate(rr3, distances, radar_indices, w)
-	time_period = time_p(r, times, rr3)
-	if v>=0: good.append(v*time_period)	
-
-	r, v = closest_good_estimate(rr1, distances, radar_indices, w)
-	time_period = time_p(r, times, rr1)
-	if v>=0: good.append(v*time_period)	
+	good.extend(all_good_estimates(rr1, distances, radar_indices, w, times))
+	good.extend(all_good_estimates(rr2, distances, radar_indices, w, times))	
+	good.extend(all_good_estimates(rr3, distances, radar_indices, w, times))	
 
 	if len(good)==0:	
 		avgs.append(0.)
 	else:
-		avgs.append(np.mean(good))
+		avg = np.mean(good)
+		avgs.append(avg)
 	
         if i % 10000 == 0:
             print "Completed row %d" % i
-    
     return ids, np.array(y), np.array(avgs)
 
 #0.00992382187229 -> 0.00971819
@@ -185,6 +202,10 @@ def data_set(file_name):
 #0.0094347918118 -> 0.00900467
 #0.00941938258085 -> 0.00893021
 #0.00938841086168 
+#0.00923516814223
+#0.00923510027563
+#0.00922980704588 -> 0.00871121
+#0.00922233467044
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
@@ -195,8 +216,9 @@ _, y, avgs = data_set('train_2013.csv')
 print 'CRPS: ',  calc_crps(cdfs(avgs), y)
 print 'RMSE', math.sqrt(np.mean((y[y<100]-avgs[y<100])**2))
 
-#plt.scatter(avgs[y<100], y[y<100])
-#plt.show()
+plt.scatter(avgs[y<100], y[y<100])
+#plt.hist(y[y<100], log=True)
+plt.show()
 
 
 print 'Predicting for sumbission...'
