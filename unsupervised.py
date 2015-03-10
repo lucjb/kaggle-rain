@@ -46,30 +46,7 @@ def split_radars(times):
 		j+=1
 	T.append(range(s,j))
 	return T
-
-def closest_slice(distances):	
-	min_distance = np.min(distances)
-	closest_slice = []
-	for j, d in enumerate(distances):
-		if d == min_distance:
-			closest_slice.append(j)	
-	return closest_slice, min_distance
 		
-def time_p(radar_ind, times, rr):
-	max_t = -1.
-	min_t =	100.
-		
-	for ri in radar_ind:
-		if rr[ri]>0 and times[ri]<min_t:
-			min_t=times[ri]
-		if rr[ri]>0 and times[ri]>max_t:
-			max_t=times[ri]
-	if max_t<0:
-		return 0
-	b = (times.max()-times.min())/2/len(times)
-	time_period = (max_t-min_t + b)/60
-	return time_period
-
 def mean_without_zeros(a):
 	filtered = a[a!=0]
 	if len(filtered)==0:
@@ -77,47 +54,6 @@ def mean_without_zeros(a):
 	return filtered.mean()
 
 
-def closest_good_estimate_w(rr, distances, radar_indices, w):
-	ws = []
-	for we in w:
-		if we<=1:
-			ws.append(we)
-		else:
-			ws.append(0)
-	w = np.array(ws)
-	r, _ = closest_slice(distances)
-	q = np.sum(w[r])					
-	if q>0:
-		v = np.average(rr[r], weights=w[r])
-	else:
-		v=-1
-	min_dis = 100000
-	for radar in radar_indices:
-		q = np.sum(w[radar])					
-		if q>0:
-			v2 = np.average(rr[radar], weights=w[radar])
-		else:
-			v2=-1
-		dis = distances[radar][0]					
-		if v2>=0 and dis<min_dis:
-			r=radar
-			min_dis=dis
-			v = v2
-	return r, v
-
-def closest_good_estimate(rr, distances, radar_indices, w):
-	r = radar_indices[0]
-	v = -1
-	min_dis = 100000
-	for radar in radar_indices:
-		v2 = np.average(rr[radar])
-		dis = distances[radar][0]
-		q = np.sum(w[radar])					
-		if v2>=0 and dis<min_dis and q>0 and q<999*(len(radar)-1):
-			r=radar
-			min_dis=dis
-			v = v2
-	return r, v
 
 def clean_weights(w, filler=0):
 	clean = []
@@ -128,19 +64,32 @@ def clean_weights(w, filler=0):
 			clean.append(filler)
 	return clean
 
+def hmdir(times, rr, w):
+	hour = [0.]*61
+	for i in range(1, len(times)):
+		for j in range(int(times[len(times)-i]), int(times[len(times)-i-1])):
+			v = rr[len(times)-i-1]
+			if v>=0 and v<200 and w[len(times)-i-1]>0:
+				hour[j]=v
+
+	est = sum(hour)/60.
+#	if est> 100:
+#		print times
+#		print rr	
+#		print hour			
+#		print '----------------'	
+	return est 
+
 def all_good_estimates(rr, distances, radar_indices, w, times):
 	good = []
-	dsum = np.sum(distances)
-	if dsum==0: dsum=1
 	for radar in radar_indices:
 		v2 = np.average(rr[radar])
-		dis = distances[radar][0]
 		q = np.sum(w[radar])					
-		if v2>=0 and v2<71 and q>3:
-			time_period = time_p(radar, times, rr)
-			e = v2*time_period
-			good.append(e)
+		if v2>=0 and q>3:
+			est = hmdir(times[radar], rr[radar], w[radar])
+			good.append(est)
 	return good
+
 
 def mean(x, default=0):
 	if len(x)==0: return default
@@ -187,10 +136,10 @@ def data_set(file_name):
 	good = []
 	rr1_estimates = all_good_estimates(rr1, distances, radar_indices, w, times)
 	rr2_estimates = all_good_estimates(rr2, distances, radar_indices, w, times)
-	rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times)
+	#rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times)
 	good.extend(rr1_estimates)
 	good.extend(rr2_estimates)
-	good.extend(rr3_estimates)
+	#good.extend(rr3_estimates)
 
 	if len(good)==0:	
 		avgs.append(0.)
@@ -201,13 +150,6 @@ def data_set(file_name):
 	if i % 10000 == 0:
 		print "Completed row %d" % i
     return ids, np.array(y), np.array(avgs)
-
-def valid_ind(y):
-	valid = []
-	for i, yi in enumerate(y):
-		if yi >= 0 and yi < 100:
-			valid.append(i)	
-	return valid
 
 
 #0.00992382187229 -> 0.00971819
@@ -227,7 +169,11 @@ def valid_ind(y):
 #0.00920457357894 -> 0.00867324
 #0.0092016208212
 #0.00920147312222 -> 0.00867015
-
+#0.00920130043796
+#0.00919861298415
+#0.00919647579626
+#0.00919475970769
+#0.00919475679584
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
