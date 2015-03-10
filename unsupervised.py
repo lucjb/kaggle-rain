@@ -20,7 +20,11 @@ def cdfs(means):
 	cdfs = []
 	for estimated_mean_rr in means:
 		if estimated_mean_rr <= 0:
-			cdfs.append([1]*70)	
+			cdfs.append([1]*70)
+		elif estimated_mean_rr>70:
+			a = [0]*69
+			a.append(1)
+			cdfs.append(a)		
 		else:
 			cdfs.append(sigmoid(estimated_mean_rr, 70))	
 	return cdfs
@@ -132,12 +136,15 @@ def all_good_estimates(rr, distances, radar_indices, w, times):
 		v2 = np.average(rr[radar])
 		dis = distances[radar][0]
 		q = np.sum(w[radar])					
-		if v2>=0 and q>1:
+		if v2>=0 and v2<71 and q>3:
 			time_period = time_p(radar, times, rr)
 			e = v2*time_period
 			good.append(e)
 	return good
 
+def mean(x, default=0):
+	if len(x)==0: return default
+	return np.mean(x)
 
 def data_set(file_name):
     reader = csv.reader(open(file_name))
@@ -157,7 +164,6 @@ def data_set(file_name):
 	
     composite_ind = header.index('Composite')
     distance_ind = header.index('DistanceToRadar')
-    X = []
     y = []
     ids = []
     avgs = []
@@ -179,19 +185,30 @@ def data_set(file_name):
 	radar_indices = split_radars(times)
 	
 	good = []
-	good.extend(all_good_estimates(rr1, distances, radar_indices, w, times))
-	good.extend(all_good_estimates(rr2, distances, radar_indices, w, times))	
-	good.extend(all_good_estimates(rr3, distances, radar_indices, w, times))	
+	rr1_estimates = all_good_estimates(rr1, distances, radar_indices, w, times)
+	rr2_estimates = all_good_estimates(rr2, distances, radar_indices, w, times)
+	rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times)
+	good.extend(rr1_estimates)
+	good.extend(rr2_estimates)
+	good.extend(rr3_estimates)
 
 	if len(good)==0:	
 		avgs.append(0.)
 	else:
 		avg = np.mean(good)
 		avgs.append(avg)
-	
-        if i % 10000 == 0:
-            print "Completed row %d" % i
+
+	if i % 10000 == 0:
+		print "Completed row %d" % i
     return ids, np.array(y), np.array(avgs)
+
+def valid_ind(y):
+	valid = []
+	for i, yi in enumerate(y):
+		if yi >= 0 and yi < 100:
+			valid.append(i)	
+	return valid
+
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -206,6 +223,11 @@ def data_set(file_name):
 #0.00923510027563
 #0.00922980704588 -> 0.00871121
 #0.00922233467044
+#0.0092045862579
+#0.00920457357894 -> 0.00867324
+#0.0092016208212
+#0.00920147312222 -> 0.00867015
+
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
