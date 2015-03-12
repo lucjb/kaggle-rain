@@ -136,10 +136,10 @@ def data_set(file_name):
 	good = []
 	rr1_estimates = all_good_estimates(rr1, distances, radar_indices, w, times)
 	rr2_estimates = all_good_estimates(rr2, distances, radar_indices, w, times)
-	#rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times)
+	rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times)
 	good.extend(rr1_estimates)
 	good.extend(rr2_estimates)
-	#good.extend(rr3_estimates)
+	good.extend(rr3_estimates)
 
 	if len(good)==0:	
 		avgs.append(0.)
@@ -174,6 +174,8 @@ def data_set(file_name):
 #0.00919647579626
 #0.00919475970769
 #0.00919475679584
+#0.00919925936666 -> 0.00866491
+
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
