@@ -2,10 +2,37 @@ import csv
 import numpy as np
 import matplotlib.pyplot as plt
 import math
+from math import *
+from scipy import interpolate
 
 thresholds = np.arange(70)
 def heaviside(actual):
     return thresholds >= actual
+
+def erfcc(x):
+    """Complementary error function."""
+    z = abs(x)
+    t = 1. / (1. + 0.5*z)
+    r = t * exp(-z*z-1.26551223+t*(1.00002368+t*(.37409196+
+    	t*(.09678418+t*(-.18628806+t*(.27886807+
+    	t*(-1.13520398+t*(1.48851587+t*(-.82215223+
+    	t*.17087277)))))))))
+    if (x >= 0.):
+    	return r
+    else:
+    	return 2. - r
+
+def normcdf(x, mu, sigma):
+    t = x-mu;
+    y = 0.5*erfcc(-t/(sigma*sqrt(2.0)));
+    if y>1.0:
+        y = 1.0;
+    return y
+
+def gauss(mean, l, v=1):
+	xs = np.arange(l)
+	return [normcdf(x, mean, v) for x in xs]
+
 
 def calc_crps(predictions, actuals):
     obscdf = np.array([heaviside(i) for i in actuals])
@@ -15,6 +42,13 @@ def calc_crps(predictions, actuals):
 def sigmoid(center, length):
     xs = np.arange(length)
     return 1. / (1 + np.exp(-(xs - center)))
+
+def step(center, length=70):
+	x = [1.]*length
+	for i in range(0, int(center)+1):
+		x[i]=0.
+	return np.array(x)
+
 
 def cdfs(means):
 	cdfs = []
@@ -64,13 +98,25 @@ def clean_weights(w, filler=0):
 			clean.append(filler)
 	return clean
 
+def hmdir_(times, rr, w):
+	valid_t = times[rr>=0]
+	valid_r = rr[rr>=0]
+	if len(valid_t)<2: return 0
+	f = interpolate.interp1d(valid_t, valid_r)
+#	print valid_t
+#	print valid_r
+	ra = range(int(valid_t.min()), int(valid_t.max()+1))	
+	tl = f(ra)
+	return np.sum(tl)/60.
+
 def hmdir(times, rr, w):
 	hour = [0.]*61
 	for i in range(1, len(times)):
 		for j in range(int(times[len(times)-i]), int(times[len(times)-i-1])):
 			v = rr[len(times)-i-1]
-			if v>=0 and v<200 and w[len(times)-i-1]>0:
-				hour[j]=v
+			q =  w[len(times)-i-1]
+			if v>=0 and v<200 and q>0 and q<=1:
+				hour[j]=v*q
 
 	est = sum(hour)/60.
 #	if est> 100:
@@ -175,6 +221,7 @@ def data_set(file_name):
 #0.00919475970769
 #0.00919475679584
 #0.00919925936666 -> 0.00866491
+#0.00919632360195
 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples

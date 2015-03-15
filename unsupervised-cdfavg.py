@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 import math
 import scipy.stats
 from math import *
+from scipy import interpolate
+import scipy.signal
+from scipy.integrate import simps
 
 thresholds = np.arange(70)
 def heaviside(actual):
@@ -37,6 +40,12 @@ def calc_crps(predictions, actuals):
     obscdf = np.array([heaviside(i) for i in actuals])
     crps = np.mean(np.mean((predictions - obscdf) ** 2))
     return crps
+
+def step(center, length=70):
+	x = [1.]*length
+	for i in range(0, int(center)+1):
+		x[i]=0.
+	return np.array(x)
 
 def sigmoid(center, length):
     xs = np.arange(length)
@@ -91,31 +100,48 @@ def clean_weights(w, filler=0):
 			clean.append(filler)
 	return clean
 
+def hmdir_(times, rr, w):
+	valid_t = times[rr>=0]
+	q = [0.5]*len(valid_t)
+	for ai, a in enumerate(w[rr>=0]):
+		if a<=1:
+			q[ai]=a
+	valid_r = rr[rr>=0]*q
+		
+	if len(valid_t)<2: return valid_r[0]/60.
+	f = interpolate.interp1d(valid_t, valid_r)
+	ra = range(int(valid_t.min()), int(valid_t.max()+1))	
+	tl = f(ra)
+	if len(tl)>=9:
+		tl = scipy.signal.savgol_filter(tl, min(len(tl), 9), 3)
+	return simps(tl, ra)/60.
+	
+	
 def hmdir(times, rr, w):
 	hour = [0.]*61
 	for i in range(1, len(times)):
 		for j in range(int(times[len(times)-i]), int(times[len(times)-i-1])):
 			v = rr[len(times)-i-1]
-			if v>=0 and v<200 and w[len(times)-i-1]>0:
-				hour[j]=v
+			q = w[len(times)-i-1]
+			if q > 1: q = 0.5
+			if v>=0 and v<200:
+				hour[j]=v*q
 
 	est = sum(hour)/60.
-#	if est> 100:
-#		print times
-#		print rr	
-#		print hour			
-#		print '----------------'	
 	return est 
 
 def all_good_estimates(rr, distances, radar_indices, w, times):
 	good = []
+	ds = []
 	for radar in radar_indices:
 		v2 = np.average(rr[radar])
-		q = np.sum(w[radar])					
-		if v2>=0 and q>3:
+		q = np.sum(w[radar])
+		d = distances[radar][0]
+		if v2>=0 and q>3 and d>2:
 			est = hmdir(times[radar], rr[radar], w[radar])
 			good.append(est)
-	return good
+			ds.append(1./np.mean(w[radar]))
+	return good, ds
 
 
 def mean(x, default=0):
@@ -161,32 +187,29 @@ def data_set(file_name):
 	radar_indices = split_radars(times)
 	
 	good = []
-	rr1_estimates = all_good_estimates(rr1, distances, radar_indices, w, times)
-	#rr2_estimates = all_good_estimates(rr2, distances, radar_indices, w, times)
-	#rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times)
+	good_d = []
+	rr1_estimates, d1 = all_good_estimates(rr1, distances, radar_indices, w, times)
+	rr2_estimates, d2 = all_good_estimates(rr2, distances, radar_indices, w, times)
+	rr3_estimates, d3 = all_good_estimates(rr3, distances, radar_indices, w, times)
 	good.extend(rr1_estimates)
-	#good.extend(rr2_estimates)
-	#good.extend(rr3_estimates)
+	good.extend(rr2_estimates)
+	good.extend(rr3_estimates)
+	good_d.extend(d1)	
+	good_d.extend(d2)
+	good_d.extend(d3)
 
 	if len(good)>0:
-		
 		if np.mean(good)==0:
 			s = [1]*70
 			avgs.append(s)
 		else:
 			h = []	
-			for x in good:
-				if x <= 0:
-					s = [1]*70
-				elif x > 70:
-					s = [0]*69
-					s.append(1)
-				else:
-					s = sigmoid(x, 70)
-
+			for j, x in enumerate(good):	
+				s = sigmoid(round(x), 70)
 				h.append(s)
 			h = np.reshape(h, (len(good), 70))
-			total = scipy.stats.gmean(h, axis=0)
+			
+			total = np.average(h, axis=0)
 			avgs.append(total)
 	else:
 		s = [1]*70
@@ -197,6 +220,15 @@ def data_set(file_name):
     return ids, np.array(y), np.array(avgs)
 
 #0.00904234862754
+#0.00904150831178
+#0.00904983861228
+#0.00901613263585
+#0.00900412724833
+#0.00900165157547
+#0.00900155415651
+#0.00900142821889
+#0.00899566077666
+#0.00899140245563
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -222,6 +254,11 @@ def data_set(file_name):
 #0.00919475679584
 
 #0.00916480687816 -> 0.00861711
+#0.00915106704337
+#0.00913163690433 -> 0.00855668
+#0.00912739404781
+#0.00912342542954
+
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
 #987398 0s
@@ -230,11 +267,6 @@ def data_set(file_name):
 
 _, y, avgs = data_set('train.csv')
 print 'CRPS: ',  calc_crps(avgs, y)
-print 'RMSE', math.sqrt(np.mean((y[y<100]-avgs[y<100])**2))
-
-#plt.scatter(avgs[y<100], y[y<100])
-#plt.hist(y[y<100], log=True)
-#plt.show()
 
 
 print 'Predicting for sumbission...'
@@ -244,7 +276,7 @@ cdfs = avgs
 
 print 'Writing submision file...'
 
-writer = csv.writer(open('unsupervised-sub.csv', 'w'))
+writer = csv.writer(open('unsupervised-cdfagv-sub.csv', 'w'))
 solution_header = ['Id']
 solution_header.extend(['Predicted{0}'.format(t) for t in xrange(0, 70)])
 
