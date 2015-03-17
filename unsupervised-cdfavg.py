@@ -68,15 +68,24 @@ def cdfs(means):
 def parse_floats(row, col_ind):
 	return np.array(row[col_ind].split(' '), dtype='float')
 
-def parse_rr(row, rr_ind):
-	return parse_floats(row, rr_ind)
+
+def parse_rr(row, rr_ind, default=None):
+	if default:
+	 	a  = parse_floats(row, rr_ind)
+		for i, v in enumerate(a):
+			if v<0 or v>1000:
+				a[i]=default
+		return a
+	else:
+		return parse_floats(row, rr_ind)
+
 
 def split_radars(times):
 	T = []
 	j=1
 	s=0
 	while j<len(times):
-		if times[j]>=times[j-1]:
+		if times[j]!=times[j-1]:
 			T.append(range(s,j))
 			s = j 
 		j+=1
@@ -90,17 +99,16 @@ def mean_without_zeros(a):
 	return filtered.mean()
 
 
-
-def clean_weights(w, filler=0):
+def clean_radar_q(w, filler=0):
 	clean = []
 	for x in w:
 		if x>=0 and x<=1:
 			clean.append(x)
 		else:
 			clean.append(filler)
-	return clean
+	return w
 
-def hmdir_(times, rr, w):
+def hmdir_(times, rr, w, x):
 	valid_t = times[rr>=0]
 	q = [0.5]*len(valid_t)
 	for ai, a in enumerate(w[rr>=0]):
@@ -112,41 +120,53 @@ def hmdir_(times, rr, w):
 	f = interpolate.interp1d(valid_t, valid_r)
 	ra = range(int(valid_t.min()), int(valid_t.max()+1))	
 	tl = f(ra)
-	if len(tl)>=9:
-		tl = scipy.signal.savgol_filter(tl, min(len(tl), 9), 3)
-	return simps(tl, ra)/60.
+	#if len(tl)>=9:
+	#	tl = scipy.signal.savgol_filter(tl, min(len(tl), 9), 3)
+	est = sum(tl)/60.
+	return est
 	
 	
-def hmdir(times, rr, w):
+def hmdir(times, rr, w, x):
 	hour = [0.]*61
 	for i in range(1, len(times)):
 		for j in range(int(times[len(times)-i]), int(times[len(times)-i-1])):
 			v = rr[len(times)-i-1]
 			q = w[len(times)-i-1]
-			if q > 1: q = 0.5
-			if v>=0 and v<200:
+			xi = x[len(times)-i-1] 
+			if q !=1: q = 0.5
+			if v>=0 and v<100 and not xi in [6, 8]:
 				hour[j]=v*q
 
 	est = sum(hour)/60.
 	return est 
 
-def all_good_estimates(rr, distances, radar_indices, w, times):
-	good = []
+def all_good_estimates(rr, distances, radar_indices, w, times, hts):
+	asd = []
 	ds = []
+	dt = float(sum(distances))
 	for radar in radar_indices:
-		v2 = np.average(rr[radar])
-		q = np.sum(w[radar])
-		d = distances[radar][0]
-		if v2>=0 and q>3 and d>2:
-			est = hmdir(times[radar], rr[radar], w[radar])
-			good.append(est)
-			ds.append(1./np.mean(w[radar]))
-	return good, ds
+		rain = rr[radar]
+		rr_error_rate = len(rain[rain<0])/float(len(rain))
+		if rr_error_rate<0.5:
+			d = distances[radar][0]
+			est = hmdir(times[radar], rr[radar], w[radar], hts[radar])
+			asd.append(est)
+			ds.append(d)
+	return asd, ds
 
 
 def mean(x, default=0):
 	if len(x)==0: return default
 	return np.mean(x)
+
+
+def is_cdf_valid(case):
+    if case[0] < 0 or case[0] > 1:
+        return False
+    for i in xrange(1, len(case)):
+        if case[i] > 1 or case[i] < case[i-1]:
+            return False
+    return True
 
 def data_set(file_name):
     reader = csv.reader(open(file_name))
@@ -166,6 +186,7 @@ def data_set(file_name):
 	
     composite_ind = header.index('Composite')
     distance_ind = header.index('DistanceToRadar')
+    hydro_type_ind = header.index('HydrometeorType')
     y = []
     ids = []
     avgs = []
@@ -173,31 +194,31 @@ def data_set(file_name):
     for i, row in enumerate(reader):
 	ids.append(row[id_ind])	        
 	times = parse_floats(row, time_ind)
-	distances = parse_floats(row, time_ind)
+	distances = parse_floats(row, distance_ind)
         rr1 = parse_rr(row, rr1_ind)
         rr2 = parse_rr(row, rr2_ind)
         rr3 = parse_rr(row, rr3_ind)
 	w = parse_floats(row, rad_q_ind)
-	
+	hidro_types = parse_floats(row, hydro_type_ind)	
+
 	if expected_ind >= 0:
 		ey = float(row[expected_ind])
 		y.append(ey)
 
 	
-	radar_indices = split_radars(times)
+	radar_indices = split_radars(distances)
 	
 	good = []
 	good_d = []
-	rr1_estimates, d1 = all_good_estimates(rr1, distances, radar_indices, w, times)
-	rr2_estimates, d2 = all_good_estimates(rr2, distances, radar_indices, w, times)
-	rr3_estimates, d3 = all_good_estimates(rr3, distances, radar_indices, w, times)
+	rr1_estimates, d1 = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types)
+	rr2_estimates, d2 = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types)
+	rr3_estimates, d3 = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types)
 	good.extend(rr1_estimates)
 	good.extend(rr2_estimates)
 	good.extend(rr3_estimates)
 	good_d.extend(d1)	
 	good_d.extend(d2)
 	good_d.extend(d3)
-
 	if len(good)>0:
 		if np.mean(good)==0:
 			s = [1]*70
@@ -210,6 +231,9 @@ def data_set(file_name):
 			h = np.reshape(h, (len(good), 70))
 			
 			total = np.average(h, axis=0)
+			if not is_cdf_valid(total):
+				plt.plot(total)
+				plt.show()			
 			avgs.append(total)
 	else:
 		s = [1]*70
@@ -229,6 +253,11 @@ def data_set(file_name):
 #0.00900142821889
 #0.00899566077666
 #0.00899140245563
+#0.00899136162509
+#0.00899121498571
+#0.00898516450647
+#0.00898631930177
+#0.00898616252983
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -258,6 +287,10 @@ def data_set(file_name):
 #0.00913163690433 -> 0.00855668
 #0.00912739404781
 #0.00912342542954
+#0.00912337214931
+#0.00912001249288 -> 0.00853307
+#0.00910320309268 -> 0.00849574
+
 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
@@ -265,7 +298,7 @@ def data_set(file_name):
 #133717 valid no 0
 #5580 invalid
 
-_, y, avgs = data_set('train.csv')
+_, y, avgs = data_set('train_2013.csv')
 print 'CRPS: ',  calc_crps(avgs, y)
 
 

@@ -74,7 +74,7 @@ def split_radars(times):
 	j=1
 	s=0
 	while j<len(times):
-		if times[j]>=times[j-1]:
+		if times[j]!=times[j-1]:
 			T.append(range(s,j))
 			s = j 
 		j+=1
@@ -166,7 +166,7 @@ def data_set(file_name):
     for i, row in enumerate(reader):
 	ids.append(row[id_ind])	        
 	times = parse_floats(row, time_ind)
-	distances = parse_floats(row, time_ind)
+	distances = parse_floats(row, distance_ind)
         rr1 = parse_rr(row, rr1_ind)
         rr2 = parse_rr(row, rr2_ind)
         rr3 = parse_rr(row, rr3_ind)
@@ -177,8 +177,8 @@ def data_set(file_name):
 		y.append(ey)
 
 	
-	radar_indices = split_radars(times)
-	
+	radar_indices = split_radars(distances)
+
 	good = []
 	rr1_estimates = all_good_estimates(rr1, distances, radar_indices, w, times)
 	rr2_estimates = all_good_estimates(rr2, distances, radar_indices, w, times)
@@ -229,7 +229,7 @@ def data_set(file_name):
 #133717 valid no 0
 #5580 invalid
 
-_, y, avgs = data_set('train_2013.csv')
+_, y, avgs = data_set('train.csv')
 print 'CRPS: ',  calc_crps(cdfs(avgs), y)
 print 'RMSE', math.sqrt(np.mean((y[y<100]-avgs[y<100])**2))
 
