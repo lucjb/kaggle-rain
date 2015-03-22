@@ -80,12 +80,12 @@ def parse_rr(row, rr_ind, default=None):
 		return parse_floats(row, rr_ind)
 
 
-def split_radars(times):
+def split_radars(distances, times):
 	T = []
 	j=1
 	s=0
-	while j<len(times):
-		if times[j]!=times[j-1]:
+	while j<len(distances):
+		if distances[j]!=distances[j-1] or times[j]>=times[j-1]:
 			T.append(range(s,j))
 			s = j 
 		j+=1
@@ -108,51 +108,76 @@ def clean_radar_q(w, filler=0):
 			clean.append(filler)
 	return w
 
-def hmdir_(times, rr, w, x):
-	valid_t = times[rr>=0]
+def hmdir_(times, rr, w, x, d):
+	valid_t = times[(rr>=0)&(rr<100)]
+	valid_r = rr[(rr>=0)&(rr<100)]
+	
 	q = [0.5]*len(valid_t)
-	for ai, a in enumerate(w[rr>=0]):
-		if a<=1:
-			q[ai]=a
-	valid_r = rr[rr>=0]*q
-		
+	for ai, a in enumerate(w[(rr>=0)&(rr<100)]):
+		if a==1:
+			q[ai]=1
+	valid_r = valid_r*q
+	if len(valid_t)==0: return 0	
 	if len(valid_t)<2: return valid_r[0]/60.
 	f = interpolate.interp1d(valid_t, valid_r)
 	ra = range(int(valid_t.min()), int(valid_t.max()+1))	
 	tl = f(ra)
-	#if len(tl)>=9:
-	#	tl = scipy.signal.savgol_filter(tl, min(len(tl), 9), 3)
+	#plt.plot(tl)
+
+	if len(tl)>=11:
+		tl = scipy.signal.savgol_filter(tl, min(len(tl), 11), 4)
+		
+	#plt.plot(tl)
+	#plt.show()
 	est = sum(tl)/60.
 	return est
 	
 	
-def hmdir(times, rr, w, x):
+def hmdir(times, rr, w, hts, distances, ey, defaults):
 	hour = [0.]*61
 	for i in range(1, len(times)):
 		for j in range(int(times[len(times)-i]), int(times[len(times)-i-1])):
 			v = rr[len(times)-i-1]
 			q = w[len(times)-i-1]
-			xi = x[len(times)-i-1] 
-			if q !=1: q = 0.5
-			if v>=0 and v<100 and not xi in [6, 8]:
+			ht = hts[len(times)-i-1] 
+			if q!=1: q = 0.5
+			if v>=0 and v<100 and not ht in [6, 8]:
 				hour[j]=v*q
+			elif ht == 1:
+				hour[j]=defaults[0]
+			elif ht == 2:
+				hour[j]=defaults[1]
+			elif ht == 3:
+				hour[j]=defaults[2]
 
+			
 	est = sum(hour)/60.
-	return est 
+	return est
 
-def all_good_estimates(rr, distances, radar_indices, w, times, hts):
-	asd = []
-	ds = []
-	dt = float(sum(distances))
+def all_good_estimates(rr, distances, radar_indices, w, times, hts, ey, defaults):
+	age = []
+	agd = []
 	for radar in radar_indices:
 		rain = rr[radar]
-		rr_error_rate = len(rain[rain<0])/float(len(rain))
-		if rr_error_rate<0.5:
-			d = distances[radar][0]
-			est = hmdir(times[radar], rr[radar], w[radar], hts[radar])
-			asd.append(est)
-			ds.append(d)
-	return asd, ds
+		q = w[radar]
+		rr_error_rate = len(rain[(rain<0)])/float(len(rain))
+		bad_q_rate = len(q[(q==0.)])/float(len(q))
+		q_error_rate = len(q[(q>1.)])/float(len(q))
+		if rr_error_rate<0.5:	
+			est = hmdir(times[radar], rr[radar], w[radar], hts[radar], distances[radar], ey, defaults)
+			age.append(est)
+			agd.append(distances[radar][0])
+		else:
+			'''
+			rt = hts[radar]
+			rt_rate = len(rt[(rt>1)&(rt<4)])/float(len(rt))
+			if rt_rate>0.05:
+				age.append(20)
+			else:
+				age.append(0)
+			agd.append(distances[radar][0])
+			'''
+	return age, agd
 
 
 def mean(x, default=0):
@@ -167,6 +192,29 @@ def is_cdf_valid(case):
         if case[i] > 1 or case[i] < case[i-1]:
             return False
     return True
+
+def avg_cdf(h):
+	h = np.reshape(h, (len(h), 70))
+	total = np.average(h, axis=0)
+	return total
+
+def estimate_cdf(good):
+	cdf = None
+	if len(good)>0:
+		if np.mean(good)==0:
+			cdf = [1]*70
+		else:
+			h = []	
+			for j, x in enumerate(good):	
+				s = sigmoid(round(x), 70)
+				h.append(s)
+			total = avg_cdf(h)
+			cdf = total
+	else:
+		cdf = [1]*70
+	
+	return cdf
+
 
 def data_set(file_name):
     reader = csv.reader(open(file_name))
@@ -190,6 +238,12 @@ def data_set(file_name):
     y = []
     ids = []
     avgs = []
+    errors = []
+    error_distances = []
+    g = 0
+    rain_types1 = []
+    rain_types2 = []
+    rain_types3 = []
 
     for i, row in enumerate(reader):
 	ids.append(row[id_ind])	        
@@ -197,51 +251,79 @@ def data_set(file_name):
 	distances = parse_floats(row, distance_ind)
         rr1 = parse_rr(row, rr1_ind)
         rr2 = parse_rr(row, rr2_ind)
-        rr3 = parse_rr(row, rr3_ind)
+        rr3 = np.fabs(parse_rr(row, rr3_ind))
 	w = parse_floats(row, rad_q_ind)
 	hidro_types = parse_floats(row, hydro_type_ind)	
-
+	
 	if expected_ind >= 0:
 		ey = float(row[expected_ind])
 		y.append(ey)
-
+	else:
+		ey = -1
 	
-	radar_indices = split_radars(distances)
+	radar_indices = split_radars(distances, times)
+	'''
+	for radar in radar_indices:
+		rht = hidro_types[radar]
+		for j, x in enumerate(rht):
+			if x==1:
+				rain_types1.append(rr2[radar][j])
+			elif x==2:
+				rain_types2.append(rr2[radar][j])
+			elif x==3:
+				rain_types3.append(rr2[radar][j])
+	'''
 	
 	good = []
-	good_d = []
-	rr1_estimates, d1 = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types)
-	rr2_estimates, d2 = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types)
-	rr3_estimates, d3 = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types)
+	rr1_estimates, rr1_d = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types, ey, [0.33, 33.31, 33.31])
+	rr2_estimates, rr2_d  = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types, ey, [1.51, 36.37, 81.17])
+	rr3_estimates, rr3_d  = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types, ey, [4.52, 38.60, 42.34])
 	good.extend(rr1_estimates)
 	good.extend(rr2_estimates)
 	good.extend(rr3_estimates)
-	good_d.extend(d1)	
-	good_d.extend(d2)
-	good_d.extend(d3)
-	if len(good)>0:
-		if np.mean(good)==0:
-			s = [1]*70
-			avgs.append(s)
-		else:
-			h = []	
-			for j, x in enumerate(good):	
-				s = sigmoid(round(x), 70)
-				h.append(s)
-			h = np.reshape(h, (len(good), 70))
-			
-			total = np.average(h, axis=0)
-			if not is_cdf_valid(total):
-				plt.plot(total)
-				plt.show()			
-			avgs.append(total)
-	else:
-		s = [1]*70
-		avgs.append(s)
-
+		
+	cdfs = []
+	cdfs.append(estimate_cdf(rr1_estimates))
+	cdfs.append(estimate_cdf(rr2_estimates))
+	cdfs.append(estimate_cdf(rr3_estimates))
+	avgs.append(avg_cdf(cdfs))
+	'''
+	if ey>=0 and ey<100:
+		errors.extend(np.array(good)-ey)
+		error_distances.extend(rr1_d)
+		error_distances.extend(rr2_d)
+		error_distances.extend(rr3_d)
+     	'''
 	if i % 10000 == 0:
 		print "Completed row %d" % i
+    '''
+    errors = np.array(errors)
+    error_distances = np.array(error_distances)
+    plt.hist(errors[error_distances<10], bins=100)
+    plt.hist(errors[(error_distances>=10)&(error_distances<20)], bins=100, color='red')
+    plt.hist(errors[(error_distances>=20)&(error_distances<30)], bins=100, color='green')
+    plt.hist(errors[(error_distances>=30)&(error_distances<40)], bins=100, color='black')
+    print 'asdsad', g
+    plt.show()
+
+    rain_types1=np.array(rain_types1)
+    print np.median(rain_types1[(rain_types1>=0)&(rain_types1<1000)])
+    plt.hist(rain_types1[(rain_types1>=0)&(rain_types1<1000)])
+    plt.show()
+
+    rain_types2=np.array(rain_types2)
+    print np.median(rain_types2[(rain_types2>=0)&(rain_types2<1000)])
+    plt.hist(rain_types2[(rain_types2>=0)&(rain_types2<1000)])
+    plt.show()
+
+
+    rain_types3=np.array(rain_types3)
+    print np.median(rain_types3[(rain_types3>=0)&(rain_types3<1000)])
+    plt.hist(rain_types3[(rain_types3>=0)&(rain_types3<1000)])
+    plt.show()
+    '''	
     return ids, np.array(y), np.array(avgs)
+
 
 #0.00904234862754
 #0.00904150831178
@@ -257,7 +339,17 @@ def data_set(file_name):
 #0.00899121498571
 #0.00898516450647
 #0.00898631930177
-#0.00898616252983
+#0.00898616252983 --
+#0.00894938332555
+#0.00894852729502
+#0.00894846604764
+#0.00894788853756
+#0.00894671310461
+#0.00894636668274
+#0.00894535250385
+#0.0089344109825
+#0.00893531092568
+#0.00898349408228
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -281,7 +373,6 @@ def data_set(file_name):
 #0.00919647579626
 #0.00919475970769
 #0.00919475679584
-
 #0.00916480687816 -> 0.00861711
 #0.00915106704337
 #0.00913163690433 -> 0.00855668
@@ -290,7 +381,10 @@ def data_set(file_name):
 #0.00912337214931
 #0.00912001249288 -> 0.00853307
 #0.00910320309268 -> 0.00849574
-
+#0.00907174536772 ***
+#0.00907146849158 -> 0.00849297
+#0.00907144426707 -> 0.00849229
+#0.00910805136467 -> 0.00846733
 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
