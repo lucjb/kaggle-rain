@@ -149,11 +149,11 @@ def hmdir(times, rr, w, hts, distances, ey, defaults):
 				hour[j]=defaults[1]*q
 			elif ht == 3:
 				hour[j]=defaults[2]*q
-
+			
 			
 	est = sum(hour)/60.
 	return est
-
+	
 def all_good_estimates(rr, distances, radar_indices, w, times, hts, ey, defaults):
 	age = []
 	agd = []
@@ -206,6 +206,44 @@ def estimate_cdf(good):
 	return cdf
 
 
+def radar_features(rr, hts, w, d, waters):
+	m = float(len(rr))
+	error_rate = len(rr[rr<0])/m
+	zero_rate = len(rr[rr==0])/m
+	oor_rate = len(rr[rr>2000])/m
+	rain_rate = len(rr[(rr>10)&(rr<=100)])/m
+
+	bad_q = len(w[w==0])/m
+	oor_q = len(w[w>1])/m
+	good_q = len(w[w==1])/m
+	ok_q = len(w[(w>0)&(w<1)])/m
+
+	distance = d[0]
+	ht0 = len(hts[hts==0])
+	ht1 = len(hts[hts==1])
+	ht2 = len(hts[hts==2])
+	ht3 = len(hts[hts==3])
+	ht4 = len(hts[hts==4])
+	ht5 = len(hts[hts==5])
+
+	ht6 = len(hts[hts==6])
+	ht7 = len(hts[hts==7])
+	ht8 = len(hts[hts==8])
+
+	ht9 = len(hts[hts==9])
+	ht13 = len(hts[hts==13])
+	ht14 = len(hts[hts==14])
+
+	return [ht13/m, ok_q, oor_q, ht6/m, ht2/m, m, -1]	
+
+#0.00895660879826
+#0.00895629729627
+#0.0089555104762
+#0.00894224941284
+#0.00893217139966
+#0.00893150685717
+#0.00892673459363
+
 def data_set(file_name):
     reader = csv.reader(open(file_name))
 
@@ -225,6 +263,10 @@ def data_set(file_name):
     composite_ind = header.index('Composite')
     distance_ind = header.index('DistanceToRadar')
     hydro_type_ind = header.index('HydrometeorType')
+    water_ind = header.index('LogWaterVolume')
+    mwm_ind = header.index('MassWeightedMean')
+
+
     y = []
     ids = []
     avgs = []
@@ -234,7 +276,8 @@ def data_set(file_name):
     rain_types1 = []
     rain_types2 = []
     rain_types3 = []
-
+    X = []
+    all_waters = []
     for i, row in enumerate(reader):
 	ids.append(row[id_ind])	        
 	times = parse_floats(row, time_ind)
@@ -243,7 +286,9 @@ def data_set(file_name):
         rr2 = parse_rr(row, rr2_ind)
         rr3 = np.fabs(parse_rr(row, rr3_ind))
 	w = parse_floats(row, rad_q_ind)
-	hidro_types = parse_floats(row, hydro_type_ind)	
+	hidro_types = parse_floats(row, hydro_type_ind)
+	waters = parse_floats(row, water_ind)	
+	mwms = parse_floats(row, mwm_ind)
 	
 	if expected_ind >= 0:
 		ey = float(row[expected_ind])
@@ -252,67 +297,60 @@ def data_set(file_name):
 		ey = -1
 	
 	radar_indices = split_radars(distances, times)
-	'''
+	radar_f = []
+
+	for a in mwms:
+		if not math.isnan(a):
+			all_waters.append(a)
 	for radar in radar_indices:
-		rht = hidro_types[radar]
-		for j, x in enumerate(rht):
-			if x==1:
-				rain_types1.append(rr2[radar][j])
-			elif x==2:
-				rain_types2.append(rr2[radar][j])
-			elif x==3:
-				rain_types3.append(rr2[radar][j])
-	'''
-	
-	good = []
+		rf = radar_features(rr1[radar], hidro_types[radar], w[radar], distances[radar], waters[radar])
+		radar_f.append(rf)
+			
+	total = np.average(radar_f, axis=0)	
+
 	rr1_estimates, rr1_d = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types, ey, [0.33, 33.31, 33.31])
 	rr2_estimates, rr2_d  = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types, ey, [1.51, 36.37, 81.17])
 	rr3_estimates, rr3_d  = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types, ey, [4.52, 38.60, 42.34])
-	good.extend(rr1_estimates)
-	good.extend(rr2_estimates)
-	good.extend(rr3_estimates)
-		
+
+	if len(rr1_estimates)>0:	
+		total[-1]=np.mean(rr1_estimates)
+
+	X.append(total)
+
+
 	cdfs = []
 	cdfs.append(estimate_cdf(rr1_estimates))
 	cdfs.append(estimate_cdf(rr2_estimates))
 	cdfs.append(estimate_cdf(rr3_estimates))
 	avgs.append(avg_cdf(cdfs))
-	'''
-	if ey>=0 and ey<100:
-		errors.extend(np.array(good)-ey)
-		error_distances.extend(rr1_d)
-		error_distances.extend(rr2_d)
-		error_distances.extend(rr3_d)
-     	'''
+
 	if i % 10000 == 0:
 		print "Completed row %d" % i
-    '''
-    errors = np.array(errors)
-    error_distances = np.array(error_distances)
-    plt.hist(errors[error_distances<10], bins=100)
-    plt.hist(errors[(error_distances>=10)&(error_distances<20)], bins=100, color='red')
-    plt.hist(errors[(error_distances>=20)&(error_distances<30)], bins=100, color='green')
-    plt.hist(errors[(error_distances>=30)&(error_distances<40)], bins=100, color='black')
-    print 'asdsad', g
-    plt.show()
 
-    rain_types1=np.array(rain_types1)
-    print np.median(rain_types1[(rain_types1>=0)&(rain_types1<1000)])
-    plt.hist(rain_types1[(rain_types1>=0)&(rain_types1<1000)])
-    plt.show()
+    return ids, np.array(X), np.array(y), avgs
 
-    rain_types2=np.array(rain_types2)
-    print np.median(rain_types2[(rain_types2>=0)&(rain_types2<1000)])
-    plt.hist(rain_types2[(rain_types2>=0)&(rain_types2<1000)])
-    plt.show()
+def as_labels(y):
+	labels = np.array([1]*len(y))
+	for i, yi in enumerate(y):
+		if yi == 0:
+			labels[i]=0
+	return labels
 
-
-    rain_types3=np.array(rain_types3)
-    print np.median(rain_types3[(rain_types3>=0)&(rain_types3<1000)])
-    plt.hist(rain_types3[(rain_types3>=0)&(rain_types3<1000)])
-    plt.show()
-    '''	
-    return ids, np.array(y), np.array(avgs)
+def split(X, y):
+	from sklearn.cross_validation import StratifiedShuffleSplit
+	labels = as_labels(y)
+	sss = StratifiedShuffleSplit(labels, 1, test_size=0.3)
+	for a, b in sss:
+		train_X = X[a]
+		val_X = X[b] 
+			
+		train_y = y[a]
+		val_y = y[b]
+		
+		train_labels = labels[a]
+		val_labels = labels[b]		
+		
+	return train_X, train_y, val_X, val_y, train_labels, val_labels 
 
 
 #0.00904234862754
@@ -342,6 +380,11 @@ def data_set(file_name):
 #0.00898349408228
 #0.00899329563108
 #0.00896273995689
+#0.00895327069295
+#0.00895322370697
+#0.00895317650512
+#0.00893217139966
+
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -378,6 +421,10 @@ def data_set(file_name):
 #0.00907144426707 -> 0.00849229
 #0.00910805136467 -> 0.00846733
 #0.00908048569227 -> 0.00844376
+#0.00907063607574
+#0.00907063537653
+#0.00904911201717 => 0.00842818
+#0.00904491469844
 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
@@ -385,18 +432,48 @@ def data_set(file_name):
 #133717 valid no 0
 #5580 invalid
 
-_, y, avgs = data_set('train_2013.csv')
+_, X, y, avgs = data_set('train.csv')
+
+train_X, train_y, val_X, val_y, train_labels, val_labels = split(X, y)
+
+
+from sklearn import svm
+clf = svm.LinearSVC(verbose=3, dual=False)
+from sklearn import linear_model
+clf = linear_model.LogisticRegression(tol=1e-8, C=64)
+#clf = svm.SVC(verbose=3, probability=True)
+clf.fit(X, as_labels(y))
+
+print 'Training Accuracy', clf.score(train_X, train_labels)
+print 'Validation Accuracy', clf.score(val_X, val_labels)
 print 'CRPS: ',  calc_crps(avgs, y)
+
+from sklearn.metrics import classification_report
+print classification_report(val_labels, clf.predict(val_X))
+
+X_l = clf.predict_proba(X)
+for i, l in enumerate(X_l):
+	if l[0] >0.85:
+		avgs[i]=(avgs[i]+1)/2
+
+print 'CRPS: ',  calc_crps(avgs, y)
+
 
 
 print 'Predicting for sumbission...'
 print 'Loading test file...'
-ids, _, avgs = data_set('test_2014.csv')
+ids, X, y, avgs = data_set('test_2014.csv')
+
+X_l = clf.predict_proba(X)
+for i, l in enumerate(X_l):
+	if l[0] >0.85:
+		avgs[i]=(avgs[i]+1)/2
+
 cdfs = avgs
 
 print 'Writing submision file...'
 
-writer = csv.writer(open('unsupervised-cdfagv-sub.csv', 'w'))
+writer = csv.writer(open('classifier-cdfavg-sub.csv', 'w'))
 solution_header = ['Id']
 solution_header.extend(['Predicted{0}'.format(t) for t in xrange(0, 70)])
 
