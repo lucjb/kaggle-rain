@@ -154,10 +154,12 @@ def hmdir(times, rr, w, hts, distances, ey, defaults):
 	est = sum(hour)/60.
 	return est
 	
-def all_good_estimates(rr, distances, radar_indices, w, times, hts, ey, defaults):
+def all_good_estimates(rr, distances, radar_indices, w, times, hts, ey, defaults, compos):
 	age = []
 	agd = []
 	for radar in radar_indices:
+		composites = compos[radar]
+		composite_neg_rate = len(composites[(composites<=0)])/float(len(composites))
 		rain = rr[radar]
 		q = w[radar]
 		rr_error_rate = len(rain[(rain<0)])/float(len(rain))
@@ -206,8 +208,11 @@ def estimate_cdf(good):
 	return cdf
 
 
-def radar_features(rr, hts, w, d, waters):
+def radar_features(rr, hts, w, d, waters, composites):
+
 	m = float(len(rr))
+	composite_neg_rate = len(composites[(composites!=-99900)&(composites<0)])/m
+
 	error_rate = len(rr[rr<0])/m
 	zero_rate = len(rr[rr==0])/m
 	oor_rate = len(rr[rr>2000])/m
@@ -234,7 +239,7 @@ def radar_features(rr, hts, w, d, waters):
 	ht13 = len(hts[hts==13])
 	ht14 = len(hts[hts==14])
 
-	return [ht13/m, ok_q, oor_q, ht6/m, ht2/m, m, -1]	
+	return [composite_neg_rate, ht13/m, np.sqrt(ok_q), oor_q, ht6/m, ht2/m, m, -1]	
 
 #0.00895660879826
 #0.00895629729627
@@ -243,6 +248,8 @@ def radar_features(rr, hts, w, d, waters):
 #0.00893217139966
 #0.00893150685717
 #0.00892673459363
+#0.00892397448774
+#0.00892321039254
 
 def data_set(file_name):
     reader = csv.reader(open(file_name))
@@ -289,7 +296,8 @@ def data_set(file_name):
 	hidro_types = parse_floats(row, hydro_type_ind)
 	waters = parse_floats(row, water_ind)	
 	mwms = parse_floats(row, mwm_ind)
-	
+	composites = parse_floats(row, composite_ind)
+
 	if expected_ind >= 0:
 		ey = float(row[expected_ind])
 		y.append(ey)
@@ -299,21 +307,19 @@ def data_set(file_name):
 	radar_indices = split_radars(distances, times)
 	radar_f = []
 
-	for a in mwms:
-		if not math.isnan(a):
-			all_waters.append(a)
 	for radar in radar_indices:
-		rf = radar_features(rr1[radar], hidro_types[radar], w[radar], distances[radar], waters[radar])
+		rf = radar_features(rr1[radar], hidro_types[radar], w[radar], distances[radar], waters[radar], composites[radar])
 		radar_f.append(rf)
 			
-	total = np.average(radar_f, axis=0)	
+	total = np.mean(radar_f, axis=0)	
 
-	rr1_estimates, rr1_d = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types, ey, [0.33, 33.31, 33.31])
-	rr2_estimates, rr2_d  = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types, ey, [1.51, 36.37, 81.17])
-	rr3_estimates, rr3_d  = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types, ey, [4.52, 38.60, 42.34])
+	rr1_estimates, rr1_d = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types, ey, [0.33, 33.31, 33.31], composites)
+	rr2_estimates, rr2_d  = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types, ey, [1.51, 36.37, 81.17], composites)
+	rr3_estimates, rr3_d  = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types, ey, [4.52, 38.60, 42.34], composites)
 
 	if len(rr1_estimates)>0:	
 		total[-1]=np.mean(rr1_estimates)
+
 
 	X.append(total)
 
@@ -425,6 +431,7 @@ def split(X, y):
 #0.00907063537653
 #0.00904911201717 => 0.00842818
 #0.00904491469844
+#0.00904368557564 -> 0.00841398
 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
@@ -440,7 +447,7 @@ train_X, train_y, val_X, val_y, train_labels, val_labels = split(X, y)
 from sklearn import svm
 clf = svm.LinearSVC(verbose=3, dual=False)
 from sklearn import linear_model
-clf = linear_model.LogisticRegression(tol=1e-8, C=64)
+clf = linear_model.LogisticRegression(tol=1e-8, C=128)
 #clf = svm.SVC(verbose=3, probability=True)
 clf.fit(X, as_labels(y))
 
