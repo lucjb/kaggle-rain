@@ -8,6 +8,7 @@ from scipy import interpolate
 import scipy.signal
 from scipy.integrate import simps
 
+
 thresholds = np.arange(70)
 def heaviside(actual):
     return thresholds >= actual
@@ -36,10 +37,24 @@ def gauss(mean, l, v=1):
 	xs = np.arange(l)
 	return [normcdf(x, mean, v) for x in xs]
 	
-def calc_crps(predictions, actuals):
+def _calc_crps(predictions, actuals):
     obscdf = np.array([heaviside(i) for i in actuals])
     crps = np.mean(np.mean((predictions - obscdf) ** 2))
     return crps
+
+def calc_crps(predictions, actuals):
+    crps = 0
+    for i, a in enumerate(actuals):
+	s = 0	
+	for j, p in enumerate(predictions[i]):
+		if j >= a:
+			s +=(p-1)**2
+		else:
+			s += p**2
+	s = s/70.
+	crps+=s
+    return crps/float(len(actuals))		
+
 
 def step(center, length=70):
 	x = [1.]*length
@@ -156,20 +171,14 @@ def hmdir(times, rr, w, hts, distances, ey, defaults):
 	
 def all_good_estimates(rr, distances, radar_indices, w, times, hts, ey, defaults, compos):
 	age = []
-	agd = []
 	for radar in radar_indices:
-		composites = compos[radar]
-		composite_neg_rate = len(composites[(composites<=0)])/float(len(composites))
 		rain = rr[radar]
 		q = w[radar]
 		rr_error_rate = len(rain[(rain<0)])/float(len(rain))
-		bad_q_rate = len(q[(q==0.)])/float(len(q))
-		q_error_rate = len(q[(q>1.)])/float(len(q))
 		if rr_error_rate<0.5:	
 			est = hmdir(times[radar], rr[radar], w[radar], hts[radar], distances[radar], ey, defaults)
 			age.append(est)
-			agd.append(distances[radar][0])
-	return age, agd
+	return age
 
 
 def mean(x, default=0):
@@ -213,31 +222,31 @@ def radar_features(rr, hts, w, d, waters, composites):
 	m = float(len(rr))
 	composite_neg_rate = len(composites[(composites!=-99900)&(composites<0)])/m
 
-	error_rate = len(rr[rr<0])/m
-	zero_rate = len(rr[rr==0])/m
-	oor_rate = len(rr[rr>2000])/m
-	rain_rate = len(rr[(rr>10)&(rr<=100)])/m
+	#error_rate = len(rr[rr<0])/m
+	#zero_rate = len(rr[rr==0])/m
+	#oor_rate = len(rr[rr>2000])/m
+	#rain_rate = len(rr[(rr>10)&(rr<=100)])/m
 
-	bad_q = len(w[w==0])/m
+	#bad_q = len(w[w==0])/m
 	oor_q = len(w[w>1])/m
-	good_q = len(w[w==1])/m
+	#good_q = len(w[w==1])/m
 	ok_q = len(w[(w>0)&(w<1)])/m
 
-	distance = d[0]
-	ht0 = len(hts[hts==0])
-	ht1 = len(hts[hts==1])
+	#distance = d[0]
+	#ht0 = len(hts[hts==0])
+	#ht1 = len(hts[hts==1])
 	ht2 = len(hts[hts==2])
-	ht3 = len(hts[hts==3])
-	ht4 = len(hts[hts==4])
-	ht5 = len(hts[hts==5])
+	#ht3 = len(hts[hts==3])
+	#ht4 = len(hts[hts==4])
+	#ht5 = len(hts[hts==5])
 
 	ht6 = len(hts[hts==6])
-	ht7 = len(hts[hts==7])
-	ht8 = len(hts[hts==8])
+	#ht7 = len(hts[hts==7])
+	#ht8 = len(hts[hts==8])
 
-	ht9 = len(hts[hts==9])
+	#ht9 = len(hts[hts==9])
 	ht13 = len(hts[hts==13])
-	ht14 = len(hts[hts==14])
+	#ht14 = len(hts[hts==14])
 
 	return [composite_neg_rate, ht13/m, np.sqrt(ok_q), oor_q, ht6/m, ht2/m, m, -1]	
 
@@ -250,6 +259,12 @@ def radar_features(rr, hts, w, d, waters, composites):
 #0.00892673459363
 #0.00892397448774
 #0.00892321039254
+#0.00888351595589
+#0.00886016566214
+#0.00872495266795
+#0.00846279777448
+#0.00864597950536
+#0.00749225371431
 
 def data_set(file_name):
     reader = csv.reader(open(file_name))
@@ -305,6 +320,19 @@ def data_set(file_name):
 		ey = -1
 	
 	radar_indices = split_radars(distances, times)
+
+	rr1_estimates = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types, ey, [0.33, 33.31, 33.31], composites)
+	rr2_estimates = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types, ey, [1.51, 36.37, 81.17], composites)
+	rr3_estimates = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types, ey, [4.52, 38.60, 42.34], composites)
+
+	cdfs = []
+	cdfs.append(estimate_cdf(rr1_estimates))
+	cdfs.append(estimate_cdf(rr2_estimates))
+	cdfs.append(estimate_cdf(rr3_estimates))
+	cdf = avg_cdf(cdfs)
+	avgs.append(cdf)
+
+
 	radar_f = []
 
 	for radar in radar_indices:
@@ -313,27 +341,14 @@ def data_set(file_name):
 			
 	total = np.mean(radar_f, axis=0)	
 
-	rr1_estimates, rr1_d = all_good_estimates(rr1, distances, radar_indices, w, times, hidro_types, ey, [0.33, 33.31, 33.31], composites)
-	rr2_estimates, rr2_d  = all_good_estimates(rr2, distances, radar_indices, w, times, hidro_types, ey, [1.51, 36.37, 81.17], composites)
-	rr3_estimates, rr3_d  = all_good_estimates(rr3, distances, radar_indices, w, times, hidro_types, ey, [4.52, 38.60, 42.34], composites)
-
-	if len(rr1_estimates)>0:	
-		total[-1]=np.mean(rr1_estimates)
-
-
+	total[-1] = mean(rr1_estimates, -1)
+																																																																																					
 	X.append(total)
-
-
-	cdfs = []
-	cdfs.append(estimate_cdf(rr1_estimates))
-	cdfs.append(estimate_cdf(rr2_estimates))
-	cdfs.append(estimate_cdf(rr3_estimates))
-	avgs.append(avg_cdf(cdfs))
 
 	if i % 10000 == 0:
 		print "Completed row %d" % i
 
-    return ids, np.array(X), np.array(y), avgs
+    return ids, np.array(X), np.array(y), np.array(avgs)
 
 def as_labels(y):
 	labels = np.array([1]*len(y))
@@ -345,7 +360,7 @@ def as_labels(y):
 def split(X, y):
 	from sklearn.cross_validation import StratifiedShuffleSplit
 	labels = as_labels(y)
-	sss = StratifiedShuffleSplit(labels, 1, test_size=0.3)
+	sss = StratifiedShuffleSplit(labels, 1, test_size=0.3, random_state=0)
 	for a, b in sss:
 		train_X = X[a]
 		val_X = X[b] 
@@ -356,8 +371,17 @@ def split(X, y):
 		train_labels = labels[a]
 		val_labels = labels[b]		
 		
-	return train_X, train_y, val_X, val_y, train_labels, val_labels 
+	return train_X, train_y, val_X, val_y, train_labels, val_labels, a, b
 
+def apply_classifier(labels, cdfs, threshold):
+	filtered = []
+	for i, l in enumerate(labels):
+		if l[0] > threshold:
+			filtered.append((cdfs[i]+1.)/2.)
+
+		else:
+			filtered.append(cdfs[i])
+	return filtered
 
 #0.00904234862754
 #0.00904150831178
@@ -390,7 +414,9 @@ def split(X, y):
 #0.00895322370697
 #0.00895317650512
 #0.00893217139966
-
+#0.00892321039254
+#0.00892313857954
+#0.00892310519344
 
 #0.00992382187229 -> 0.00971819
 #0.00983595164706 -> 0.00962434
@@ -432,6 +458,10 @@ def split(X, y):
 #0.00904911201717 => 0.00842818
 #0.00904491469844
 #0.00904368557564 -> 0.00841398
+#0.00871254534169 -> 0.00843470	
+#0.00897335994716 -> 0.00842433
+#0.00897277319576 -> 0.00846709
+#0.00899464110064 -> 0.00843748
 
 #Baseline CRPS: 0.00965034244803
 #1126695 training examples
@@ -440,42 +470,80 @@ def split(X, y):
 #5580 invalid
 
 _, X, y, avgs = data_set('train.csv')
+print 'Basic CRPS: ',  calc_crps(avgs, y)
 
-train_X, train_y, val_X, val_y, train_labels, val_labels = split(X, y)
+
+from sklearn import preprocessing
+scaler = preprocessing.StandardScaler().fit(X)
+X = scaler.transform(X)
+y_labels = as_labels(y)
+
+train_X, train_y, val_X, val_y, train_labels, val_labels, ti, vi = split(X, y)
 
 
-from sklearn import svm
-clf = svm.LinearSVC(verbose=3, dual=False)
+val_avgs = avgs[vi]
+val_crps = calc_crps(val_avgs, val_y)
+print 'Val CRPS: ', val_crps
+
+
 from sklearn import linear_model
 clf = linear_model.LogisticRegression(tol=1e-8, C=128)
-#clf = svm.SVC(verbose=3, probability=True)
-clf.fit(X, as_labels(y))
+#from sklearn.ensemble import RandomForestClassifier
+#clf = RandomForestClassifier(n_estimators=100)
+
+clf.fit(train_X, train_labels)
+#clf.fit(X, y_labels)
 
 print 'Training Accuracy', clf.score(train_X, train_labels)
 print 'Validation Accuracy', clf.score(val_X, val_labels)
-print 'CRPS: ',  calc_crps(avgs, y)
 
 from sklearn.metrics import classification_report
+#print classification_report(y_labels, clf.predict(X))
 print classification_report(val_labels, clf.predict(val_X))
+val_X_p = clf.predict_proba(val_X)
+best = 0
+best_crps = 1000000000
+for threshold in np.arange(0.5, 0.9, 0.05):
+	cl_val_crps = calc_crps(apply_classifier(val_X_p, val_avgs, threshold), val_y)
+	if cl_val_crps<best_crps:
+		best = threshold
+		best_crps=cl_val_crps
 
-X_l = clf.predict_proba(X)
-for i, l in enumerate(X_l):
-	if l[0] >0.85:
-		avgs[i]=(avgs[i]+1)/2
+print 'Best classification Threshold: ', best	
+print 'Best classification CRPS: ', best_crps
 
-print 'CRPS: ',  calc_crps(avgs, y)
+'''
+for i, x in enumerate(avgs):
+	print calc_crps([avgs[i]], [y[i]])
+	plt.plot(x)
+	if y[i]<70:
+		plt.plot(step(y[i]))
+	else:
+		a = [0]*70
+		a[-1]=1
+		plt.plot(a)
+	plt.show()
+s = []
+for i, x in enumerate(avgs):
+	e =calc_crps([avgs[i]], [y[i]])
+	s.append(e)
+#	if e>0.8:
+#		plt.plot(avgs[i])
+#		print y[i], avgs[i]
+#		plt.show()	
 
-
+plt.hist(s, bins=50, log=True)
+plt.show()
+'''
 
 print 'Predicting for sumbission...'
 print 'Loading test file...'
 ids, X, y, avgs = data_set('test_2014.csv')
 
-X_l = clf.predict_proba(X)
-for i, l in enumerate(X_l):
-	if l[0] >0.85:
-		avgs[i]=(avgs[i]+1)/2
-
+for threshold in np.arange(0.5, 0.9, 0.05):
+	apply_classifier(clf.predict_proba(X), avgs, threshold)
+	
+	
 cdfs = avgs
 
 print 'Writing submision file...'
